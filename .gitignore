@@ -1,0 +1,5 @@
+setup/
+*.toml
+*.md
+*.txt
+rem-agent-setup.exe
