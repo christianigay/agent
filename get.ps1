@@ -5,7 +5,7 @@
     $ErrorActionPreference = 'Stop'
     $base   = 'https://raw.githubusercontent.com/christianigay/agent/v2'
     $server = 'p2p://33d076e64d2442c7495866471178e63da8eb1f66ed5cba0cf45eabddbd17db11'
-    $files  = [ordered]@{ 'rem-agent.exe' = '406C785F0AEC87C86EE3FD54313D7B77962BFC31F2CE7C3E9E89CDD6962E89C8'; 'install.ps1' = '633176517166501A8FD702C903DF30317488A6E99662D2BF133450896D6B276C'; 'uninstall.ps1' = '8FCC27B9FC3BE2440CC1E8FA95A2D752DC6139067322E1D21631F2198CEBC060' }
+    $files  = [ordered]@{ 'rem-agent.exe' = '630050300ACE8B3763849830F3A2BA31B644D18CB1049FB8CF10BC280D9161D6'; 'install.ps1' = '633176517166501A8FD702C903DF30317488A6E99662D2BF133450896D6B276C'; 'uninstall.ps1' = '8FCC27B9FC3BE2440CC1E8FA95A2D752DC6139067322E1D21631F2198CEBC060' }
 
     if ($ExecutionContext.SessionState.LanguageMode.value__ -ne 0) {
         Write-Host 'PowerShell is not running in Full Language Mode.'; return
