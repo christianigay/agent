@@ -74,6 +74,7 @@ if (-not $SourceExe) { $SourceExe = Join-Path $ScriptDir 'rem-agent.exe' }
 $TaskPath = '\RemAgent\'
 $TaskName = 'RemAgent'
 $SystemTaskName = 'RemAgentSystem'
+$EnrollTaskName = 'RemAgentEnroll'
 $ConfigDir = Join-Path $env:ProgramData 'RemAgent'
 $ConfigFile = Join-Path $ConfigDir 'agent.toml'
 $Exe = Join-Path $InstallDir 'rem-agent.exe'
@@ -131,6 +132,7 @@ function Invoke-AgentSetup([string[]] $Flags, [string] $Key) {
         Get-Content -LiteralPath $out | ForEach-Object { $k, $v = $_ -split '=', 2; if ($k) { $result[$k] = $v } }
         Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
     }
+    $script:SetupRetryable = ($result['retryable'] -eq 'true')
     if ($p.ExitCode -ne 0 -or $result['ok'] -ne 'true') {
         $why = if ($result['error']) { $result['error'] } else { "exit code $($p.ExitCode)" }
         throw $why
@@ -159,16 +161,26 @@ if (-not $DeviceToken -and (Test-Path $ConfigFile)) {
         Write-Host "This PC is already registered with that server; keeping its device token."
     }
 }
+$deferEnroll = $false
 if (-not $DeviceToken) {
     Write-Host "Registering this PC with the server (enrollment)..."
     $enrollFlags = @('--enroll', '--server', $ServerUrl)
     if ($CaCertPath) { $enrollFlags += @('--ca-cert', $CaCertPath) }
-    $enrolled = Invoke-AgentSetup $enrollFlags $EnrollmentKey
-    $DeviceToken = $enrolled['device_token']
-    if ($DeviceToken -notmatch '^rem_\d+_[A-Za-z0-9_-]{43}$') { throw "The server sent an unusable device token." }
-    Write-Host "Registered as '$($enrolled['device_name'])'."
-    if ($enrolled['pending'] -eq 'true') {
-        Write-Host "An administrator must enable this device in the dashboard before it connects."
+    try {
+        $enrolled = Invoke-AgentSetup $enrollFlags $EnrollmentKey
+        $DeviceToken = $enrolled['device_token']
+        if ($DeviceToken -notmatch '^rem_\d+_[A-Za-z0-9_-]{43}$') { throw "The server sent an unusable device token." }
+        Write-Host "Registered as '$($enrolled['device_name'])'."
+        if ($enrolled['pending'] -eq 'true') {
+            Write-Host "An administrator must enable this device in the dashboard before it connects."
+        }
+    } catch {
+        # Only "could not reach the server" is deferred. A refused key, a
+        # disabled server or a bad address still stops the install.
+        if (-not $script:SetupRetryable) { throw }
+        Write-Host "The server can't be reached right now: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Installing anyway. This PC will register itself as soon as the server is reachable." -ForegroundColor Yellow
+        $deferEnroll = $true
     }
 }
 
@@ -197,10 +209,11 @@ if (-not $NoLocation) {
     }
 }
 
+$tokenLine = if ($deferEnroll) { '# device_token is added when this PC has registered with the server.' } else { 'device_token = "' + $DeviceToken + '"' }
 $toml = @"
 # Screen-monitoring agent configuration (managed by IT).
 server_url   = "$ServerUrl"
-device_token = "$DeviceToken"
+$tokenLine
 interval_ms  = $IntervalMs
 jpeg_quality = $JpegQuality
 "@
@@ -219,13 +232,32 @@ if ($CaCertPath) {
     # TOML literal string: backslashes need no escaping.
     $toml += "`nca_cert     = '$caDest'`n"
 }
-# The file takes its permissions from the folder (set above). Folder-style
-# inheritance flags must not be applied to a file: that left it unreadable.
-# Reset first as well, so a file left unreadable by an older installer can be replaced.
-if (Test-Path $ConfigFile) { & icacls.exe $ConfigFile /reset | Out-Null }
-Write-Utf8NoBom $ConfigFile $toml
-& icacls.exe $ConfigFile /reset | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "icacls failed on $ConfigFile" }
+$flagFile = Join-Path $ConfigDir 'pending-enroll.flag'
+$privateDir = Join-Path $ConfigDir 'private'
+if ($deferEnroll) {
+    # The enrollment key must not be readable by ordinary users: keep it, and the
+    # finished settings, in a folder only SYSTEM and administrators can open.
+    New-Item -ItemType Directory -Force -Path $privateDir | Out-Null
+    & icacls.exe $privateDir /inheritance:r /grant:r "*${SidSystem}:(OI)(CI)F" "*${SidAdmins}:(OI)(CI)F" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failed on $privateDir" }
+    Write-Utf8NoBom (Join-Path $privateDir 'enroll.key') $EnrollmentKey
+    Write-Utf8NoBom (Join-Path $privateDir 'pending.toml') $toml
+    if ($env:REM_NAME_PREFIX) { Write-Utf8NoBom (Join-Path $privateDir 'name-prefix') $env:REM_NAME_PREFIX }
+    Write-Utf8NoBom $flagFile 'This PC is waiting to register with the server.'
+    # No settings yet: the agent waits for them. An old file would point it elsewhere.
+    Remove-Item -LiteralPath $ConfigFile -Force -ErrorAction SilentlyContinue
+} else {
+    # The file takes its permissions from the folder (set above). Folder-style
+    # inheritance flags must not be applied to a file: that left it unreadable.
+    # Reset first as well, so a file left unreadable by an older installer can be replaced.
+    if (Test-Path $ConfigFile) { & icacls.exe $ConfigFile /reset | Out-Null }
+    Write-Utf8NoBom $ConfigFile $toml
+    & icacls.exe $ConfigFile /reset | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failed on $ConfigFile" }
+    Remove-Item -LiteralPath $flagFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $privateDir -Recurse -Force -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskPath $TaskPath -TaskName 'RemAgentEnroll' -Confirm:$false -ErrorAction SilentlyContinue
+}
 
 Write-Host "Registering scheduled task $TaskPath$TaskName"
 $usersGroup = (New-Object System.Security.Principal.SecurityIdentifier($SidUsers)).Translate([System.Security.Principal.NTAccount]).Value
@@ -269,6 +301,25 @@ if ($WithElevatedHelper) {
     Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $SystemTaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
+if ($deferEnroll) {
+    # One-time SYSTEM task: registers this PC once the server answers, writes the
+    # settings, then removes itself. It retries after a reboot too.
+    Write-Host "Registering one-time task $TaskPath$EnrollTaskName (runs as $SystemAccount)"
+    $enAction = New-ScheduledTaskAction -Execute $Exe -Argument '--enroll-pending' -WorkingDirectory $InstallDir
+    $enTrigger = New-ScheduledTaskTrigger -AtStartup
+    $enPrincipal = New-ScheduledTaskPrincipal -UserId $SystemAccount -LogonType ServiceAccount -RunLevel Highest
+    $enSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+        -MultipleInstances IgnoreNew `
+        -StartWhenAvailable
+    $enTask = New-ScheduledTask -Action $enAction -Trigger $enTrigger -Principal $enPrincipal -Settings $enSettings `
+        -Description 'IT security monitoring: registers this PC with the server once it is reachable.'
+    Register-ScheduledTask -TaskPath $TaskPath -TaskName $EnrollTaskName -InputObject $enTask -Force | Out-Null
+    Start-ScheduledTask -TaskPath $TaskPath -TaskName $EnrollTaskName
+}
+
 if ($StartNow) {
     Write-Host "Starting agent for logged-on users..."
     Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
@@ -276,6 +327,11 @@ if ($StartNow) {
 }
 
 Write-Host ""
+if ($deferEnroll) {
+    Write-Host "Installed, but this PC is NOT registered yet: the server was not reachable." -ForegroundColor Yellow
+    Write-Host "It retries by itself (also after a restart) and the agent starts monitoring once it succeeds."
+    Write-Host "Progress: $(Join-Path $ConfigDir 'enroll-status.txt'); a refusal is written to enroll-failed.txt there."
+}
 Write-Host "Installed. The agent starts at the next user logon$(if ($StartNow) { ' (and was started now)' })."
 if ($WithElevatedHelper) {
     Write-Host "Elevated SYSTEM helper installed (starts at boot). 'Run as administrator' works"
