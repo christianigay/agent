@@ -3,7 +3,7 @@
 # Needs: an administrator PowerShell and $env:REM_ENROLLMENT_KEY.
 & {
     $ErrorActionPreference = 'Stop'
-    $base   = 'https://github.com/christianigay/agent/releases/tag/v1'
+    $base   = 'https://raw.githubusercontent.com/christianigay/agent/v2'
     $server = 'p2p://33d076e64d2442c7495866471178e63da8eb1f66ed5cba0cf45eabddbd17db11'
     $files  = [ordered]@{ 'rem-agent.exe' = 'FD365CD9867355E2BE435833144DDFAE5E5EC1774E556226002744F253A280AE'; 'install.ps1' = 'BC88371B05123CFE46F6435F38F74282505C58E60561A63F4EFB91CD21F7AD63'; 'uninstall.ps1' = 'D0269B88DAB5AAA481A58E647955F9E800670D410D821C41DB4AEF8DC6326D90' }
 
