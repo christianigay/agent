@@ -20,7 +20,7 @@
     $dir = Join-Path ([IO.Path]::GetTempPath()) ('rem_' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $dir | Out-Null
     try {
-        Write-Host 'Downloading the agent...'
+        Write-Host 'Installing the agent...'
         $web = New-Object Net.WebClient
         foreach ($name in $files.Keys) {
             $path = Join-Path $dir $name
@@ -32,20 +32,32 @@
 
         $ps = Join-Path $PSHOME 'powershell.exe'
         $run = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')
+        # The two scripts talk a lot; keep what they say for problems, and show only the
+        # lines that need attention (a server that can't be reached, an approval to give).
+        $quiet = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
 
-        Write-Host 'Removing any installed agent...'
         $un = @($run + (Join-Path $dir 'uninstall.ps1'))
         if (-not $env:REM_FRESH) { $un += '-KeepConfig' }
-        & $ps @un
-        if ($LASTEXITCODE) { throw "uninstall.ps1 failed (exit $LASTEXITCODE)." }
+        $said = (& $ps @un 2>&1 | Out-String)
+        if ($LASTEXITCODE) { $ErrorActionPreference = $quiet; throw "Removing the old agent failed (exit $LASTEXITCODE).`r`n$said" }
 
-        Write-Host 'Installing...'
         $in = @($run + (Join-Path $dir 'install.ps1') + @('-ServerUrl', $server, '-SourceExe', (Join-Path $dir 'rem-agent.exe'), '-StartNow'))
         if (-not $env:REM_NO_ELEVATED) { $in += '-WithElevatedHelper' }
         if ($env:REM_NO_LOCATION) { $in += '-NoLocation' }
         elseif ($env:REM_LATITUDE -and $env:REM_LONGITUDE) { $in += @('-Latitude', $env:REM_LATITUDE, '-Longitude', $env:REM_LONGITUDE) }
-        & $ps @in
-        if ($LASTEXITCODE) { throw "install.ps1 failed (exit $LASTEXITCODE)." }
+        $said = (& $ps @in 2>&1 | Out-String)
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $quiet
+        if ($code) { throw "Installing failed (exit $code).`r`n$said" }
+
+        $notes = @($said -split "`r?`n" | Where-Object { $_ -match 'NOT registered|administrator must enable|can.t be reached|Installing anyway' })
+        if ($notes.Count) {
+            $notes | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+            Write-Host 'Agent installed (see above).'
+        } else {
+            Write-Host 'Agent installed successfully.'
+        }
     }
     catch { Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red }
     finally { Remove-Item -Recurse -Force -LiteralPath $dir -ErrorAction SilentlyContinue }
