@@ -19,7 +19,13 @@
 
     $dir = Join-Path ([IO.Path]::GetTempPath()) ('rem_' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $dir | Out-Null
+    $moved = $false
     try {
+        # Run everything from our own folder. Capturing a program's output starts it in
+        # PowerShell's current folder, and "the directory name is invalid" follows if
+        # that folder is gone or can't be used (a deleted or network location).
+        Push-Location -LiteralPath $dir
+        $moved = $true
         Write-Host 'Installing the agent...'
         $web = New-Object Net.WebClient
         foreach ($name in $files.Keys) {
@@ -60,5 +66,8 @@
         }
     }
     catch { Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red }
-    finally { Remove-Item -Recurse -Force -LiteralPath $dir -ErrorAction SilentlyContinue }
+    finally {
+        if ($moved) { try { Pop-Location -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:SystemRoot } catch {} } }
+        Remove-Item -Recurse -Force -LiteralPath $dir -ErrorAction SilentlyContinue
+    }
 }
