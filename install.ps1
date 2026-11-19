@@ -62,7 +62,11 @@ param(
     # Also install the elevated SYSTEM helper (a second task running as SYSTEM)
     # so the dashboard's "Run as administrator" can target this PC. Off unless
     # requested; the server must also set [commands] allow_elevated = true.
-    [switch] $WithElevatedHelper
+    [switch] $WithElevatedHelper,
+    # Update in place: keep this PC's registration (device token and server) and only
+    # replace the program. Needs no enrollment key; fails, before changing anything,
+    # if the PC is not registered with that server yet.
+    [switch] $Update
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,11 +101,21 @@ function Set-RestrictedAcl([string] $Path) {
 if (-not (Test-Path $SourceExe)) { throw "rem-agent.exe not found at $SourceExe" }
 
 # --- What to connect to, and how this PC gets its token.
+if ($Update) {
+    # Checked first: nothing below may remove a working agent that can't be restored.
+    $saved = if (Test-Path $ConfigFile) { Get-Content -LiteralPath $ConfigFile -Raw } else { '' }
+    if ($saved -notmatch '(?m)^\s*device_token\s*=\s*"rem_\d+_[A-Za-z0-9_-]{43}"') {
+        throw "-Update needs a registered PC: there is no saved device token in $ConfigFile. Run the full installer with the enrollment key."
+    }
+    if ($ServerUrl -and $saved -notmatch ('(?m)^\s*server_url\s*=\s*"' + [regex]::Escape($ServerUrl) + '"')) {
+        throw "-Update can't change the server: $ConfigFile points somewhere else than $ServerUrl."
+    }
+}
 if ($ServerUrl -and $AliasServer) { throw "Use either -ServerUrl or -AliasServer, not both." }
 if (-not $ServerUrl -and -not $AliasServer) { throw "Give the server: -ServerUrl <address> or -AliasServer <name>." }
 if (-not $EnrollmentKey) { $EnrollmentKey = $env:REM_ENROLLMENT_KEY }
 if ($DeviceToken -and $EnrollmentKey -and $PSBoundParameters.ContainsKey('EnrollmentKey')) { throw "Use either -DeviceToken or -EnrollmentKey, not both." }
-if (-not $DeviceToken -and -not $EnrollmentKey) { throw "Give -DeviceToken (device added on the server) or -EnrollmentKey (passive install)." }
+if (-not $DeviceToken -and -not $EnrollmentKey -and -not $Update) { throw "Give -DeviceToken (device added on the server) or -EnrollmentKey (passive install)." }
 if ($PSBoundParameters.ContainsKey('Latitude') -ne $PSBoundParameters.ContainsKey('Longitude')) { throw "Give -Latitude and -Longitude together." }
 
 Write-Host "Stopping running agents (if any)..."
@@ -160,6 +174,9 @@ if (-not $DeviceToken -and (Test-Path $ConfigFile)) {
         $DeviceToken = $Matches[1]
         Write-Host "This PC is already registered with that server; keeping its device token."
     }
+}
+if ($Update -and -not $DeviceToken) {
+    throw "-Update: this PC's saved registration is for a different server than $ServerUrl. Run the full installer with the enrollment key."
 }
 $deferEnroll = $false
 if (-not $DeviceToken) {
