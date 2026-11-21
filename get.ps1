@@ -1,11 +1,11 @@
-# REM agent one-line installer for p2p://33d076e64d2442c7495866471178e63da8eb1f66ed5cba0cf45eabddbd17db11.
+# FarSeer agent one-line installer for p2p://33d076e64d2442c7495866471178e63da8eb1f66ed5cba0cf45eabddbd17db11.
 # Removes any installed agent, then registers this PC with the server.
 # Needs: an administrator PowerShell and $env:REM_ENROLLMENT_KEY.
 & {
     $ErrorActionPreference = 'Stop'
     $base   = 'https://raw.githubusercontent.com/christianigay/agent/v2'
     $server = 'p2p://33d076e64d2442c7495866471178e63da8eb1f66ed5cba0cf45eabddbd17db11'
-    $files  = [ordered]@{ 'rem-agent.exe' = '630050300ACE8B3763849830F3A2BA31B644D18CB1049FB8CF10BC280D9161D6'; 'install.ps1' = '85C76EEE6A5D29A0B63D84D54A34164285D80E12E5FABBFA15430C4964BD0A60'; 'uninstall.ps1' = '8FCC27B9FC3BE2440CC1E8FA95A2D752DC6139067322E1D21631F2198CEBC060' }
+    $files  = [ordered]@{ 'rem-agent.exe' = 'B57C82E5EA317A8CF539AB815F37BB82BEC3D42920A078475BD7DB446961B18E'; 'install.ps1' = '85C76EEE6A5D29A0B63D84D54A34164285D80E12E5FABBFA15430C4964BD0A60'; 'uninstall.ps1' = '8FCC27B9FC3BE2440CC1E8FA95A2D752DC6139067322E1D21631F2198CEBC060' }
 
     if ($ExecutionContext.SessionState.LanguageMode.value__ -ne 0) {
         Write-Host 'PowerShell is not running in Full Language Mode.'; return
