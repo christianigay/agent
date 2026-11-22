@@ -3,3 +3,6 @@ setup/
 *.md
 *.txt
 rem-agent-setup.exe
+install-server.ps1
+rem-server.exe
+uninstall-server.ps1
