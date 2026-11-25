@@ -1,12 +1,12 @@
-# FarSeer agent one-line installer for p2p://9108608941fd25122deb9c053e7e5b46ac10ce2e1dedbcc6de01415db9bec2d6.
+# FarSeer agent one-line installer for p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65.
 # Removes any installed agent, then registers this PC with the server.
 # Needs: an administrator PowerShell and $env:FARSEER_ENROLLMENT_KEY.
-# Optional: $env:FARSEER_SERVER connects to another server instead of p2p://9108608941fd25122deb9c053e7e5b46ac10ce2e1dedbcc6de01415db9bec2d6.
+# Optional: $env:FARSEER_SERVER connects to another server instead of p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65.
 & {
     $ErrorActionPreference = 'Stop'
     $base   = 'https://github.com/christianigay/agent/releases/download/v2'
-    $server = 'p2p://9108608941fd25122deb9c053e7e5b46ac10ce2e1dedbcc6de01415db9bec2d6'
-    $files  = [ordered]@{ 'farseer-agent.exe' = 'C0AA361991081526AE50090E2AAC08C383B49C555B9FE38116FA5A496471B343'; 'install.ps1' = '43594CF7F547B3AD4E7DDB7C1295F2909EEC994B37AE8C6C5E5736944737BE0F'; 'uninstall.ps1' = '0F709A45CFFCD5C885834EE35F1184938CCC7A8F20102C5C8ACC8AFC6003D431' }
+    $server = 'p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65'
+    $files  = [ordered]@{ 'farseer-agent.exe' = 'CE79756DBE4400228357A993F1360333041604841E8EF9C9634A567630D0B05C'; 'install.ps1' = '43594CF7F547B3AD4E7DDB7C1295F2909EEC994B37AE8C6C5E5736944737BE0F'; 'uninstall.ps1' = '0F709A45CFFCD5C885834EE35F1184938CCC7A8F20102C5C8ACC8AFC6003D431' }
     # One shared installer can serve many servers: the command may name the server to connect to.
     if ($env:FARSEER_SERVER) {
         if ($env:FARSEER_SERVER -match '^(p2p://[0-9A-Fa-f]{64}|wss://[A-Za-z0-9._:/-]+)$') { $server = $env:FARSEER_SERVER }
@@ -35,6 +35,9 @@
         $oldCfg = Join-Path $env:ProgramData 'RemAgent\agent.toml'
         if (-not (Test-Path $cfgFile) -and (Test-Path $oldCfg)) { $cfgFile = $oldCfg }
         $saved = if (Test-Path $cfgFile) { Get-Content -LiteralPath $cfgFile -Raw } else { '' }
+        # An update keeps the server this PC already reports to, so one shared installer can
+        # update PCs registered with any server (unless FARSEER_SERVER names one explicitly).
+        if (-not $env:FARSEER_SERVER -and $saved -match '(?m)^\s*server_url\s*=\s*"(p2p://[0-9A-Fa-f]{64}|wss://[A-Za-z0-9._:/-]+)"') { $server = $Matches[1] }
         if (($saved -notmatch '(?m)^\s*device_token\s*=\s*"rem_\d+_[A-Za-z0-9_-]{43}"') -or
             ($saved -notmatch ('(?m)^\s*server_url\s*=\s*"' + [regex]::Escape($server) + '"'))) {
             Write-Host 'Error: this PC is not registered with this server, so it cannot be updated. Install it with the enrollment key instead (nothing was changed).' -ForegroundColor Red
