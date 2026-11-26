@@ -6,7 +6,7 @@
     $ErrorActionPreference = 'Stop'
     $base   = 'https://github.com/christianigay/agent/releases/download/v2'
     $server = 'p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65'
-    $files  = [ordered]@{ 'farseer-agent.exe' = 'CE79756DBE4400228357A993F1360333041604841E8EF9C9634A567630D0B05C'; 'install.ps1' = '43594CF7F547B3AD4E7DDB7C1295F2909EEC994B37AE8C6C5E5736944737BE0F'; 'uninstall.ps1' = '0F709A45CFFCD5C885834EE35F1184938CCC7A8F20102C5C8ACC8AFC6003D431' }
+    $files  = [ordered]@{ 'farseer-agent.exe' = '60E3CCB8781E11BF158FC13D8B8659FDD6285F58370D9B6C712240AB3C221D77'; 'install.ps1' = '43594CF7F547B3AD4E7DDB7C1295F2909EEC994B37AE8C6C5E5736944737BE0F'; 'uninstall.ps1' = '0F709A45CFFCD5C885834EE35F1184938CCC7A8F20102C5C8ACC8AFC6003D431' }
     # One shared installer can serve many servers: the command may name the server to connect to.
     if ($env:FARSEER_SERVER) {
         if ($env:FARSEER_SERVER -match '^(p2p://[0-9A-Fa-f]{64}|wss://[A-Za-z0-9._:/-]+)$') { $server = $env:FARSEER_SERVER }
