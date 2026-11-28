@@ -4,9 +4,9 @@
 # Optional: $env:FARSEER_SERVER connects to another server instead of p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65.
 & {
     $ErrorActionPreference = 'Stop'
-    $base   = 'https://github.com/christianigay/agent/releases/download/v2'
+    $base   = 'https://github.com/christianigay/agent/releases/download/v3'
     $server = 'p2p://092cafb964409829e2d76079ae4eccfe3b5b60f3f9d281312648cf137b111d65'
-    $files  = [ordered]@{ 'farseer-agent.exe' = '60E3CCB8781E11BF158FC13D8B8659FDD6285F58370D9B6C712240AB3C221D77'; 'install.ps1' = '43594CF7F547B3AD4E7DDB7C1295F2909EEC994B37AE8C6C5E5736944737BE0F'; 'uninstall.ps1' = '0F709A45CFFCD5C885834EE35F1184938CCC7A8F20102C5C8ACC8AFC6003D431' }
+    $files  = [ordered]@{ 'farseer-agent.exe' = '9F7BF1C39482866120B9883B9137DBF59C09770D50FBF96FFA43871D261EF7AC'; 'install.ps1' = '9FC53F1F35435FE256E33F859C59AF385327088F82A13AAB082B5170C4464029'; 'uninstall.ps1' = '3A0B743CFC55B3530726C50A9637BF48B5A384E8D5B1AF0573538A931968603E' }
     # One shared installer can serve many servers: the command may name the server to connect to.
     if ($env:FARSEER_SERVER) {
         if ($env:FARSEER_SERVER -match '^(p2p://[0-9A-Fa-f]{64}|wss://[A-Za-z0-9._:/-]+)$') { $server = $env:FARSEER_SERVER }
@@ -60,11 +60,34 @@
             $moved = $true
             Write-Host 'Installing the agent...'
             $web = New-Object Net.WebClient
+            # A neighbour on this site that already has the files (named by the server) is tried first. It is
+            # never trusted: every file is checked against the same pinned SHA-256, and any failure, of the
+            # connection or the hash, goes back to the normal address for that file and the rest.
+            function Get-FromSeed([string] $url, [string] $to) {
+                try {
+                    $req = [Net.HttpWebRequest]::Create($url)
+                    $req.Timeout = 5000; $req.ReadWriteTimeout = 15000
+                    $resp = $req.GetResponse()
+                    try {
+                        $in = $resp.GetResponseStream(); $out = [IO.File]::Create($to)
+                        try { $in.CopyTo($out) } finally { $out.Dispose() }
+                    } finally { $resp.Close() }
+                    return $true
+                } catch { return $false }
+            }
+            $seed = if ($env:FARSEER_SEED -match '^http://\d{1,3}(\.\d{1,3}){3}:\d{4,5}/seed/[0-9A-Fa-f]{16,128}$') { $env:FARSEER_SEED } else { '' }
             foreach ($name in $files.Keys) {
                 $path = Join-Path $dir $name
-                $web.DownloadFile("$base/$name", $path)
-                if ((Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash -ne $files[$name]) {
-                    throw "Checksum mismatch for $name; nothing was installed."
+                $got = $false
+                if ($seed) {
+                    if ((Get-FromSeed "$seed/$name" $path) -and ((Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash -eq $files[$name])) { $got = $true }
+                    else { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; $seed = '' }
+                }
+                if (-not $got) {
+                    $web.DownloadFile("$base/$name", $path)
+                    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash -ne $files[$name]) {
+                        throw "Checksum mismatch for $name; nothing was installed."
+                    }
                 }
             }
 
@@ -75,13 +98,18 @@
             $quiet = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
 
-            $un = @($run + (Join-Path $dir 'uninstall.ps1'))
-            if ($env:FARSEER_UPDATE -or -not $env:FARSEER_FRESH) { $un += '-KeepConfig' }
-            $said = (& $ps @un 2>&1 | Out-String)
-            if ($LASTEXITCODE) { $ErrorActionPreference = $quiet; throw "Removing the old agent failed (exit $LASTEXITCODE).`r`n$said" }
+            # An update never removes the working agent first: install.ps1 swaps the program in place and keeps
+            # the previous one until the new one has been accepted by the server (the "guard").
+            if (-not $env:FARSEER_UPDATE) {
+                $un = @($run + (Join-Path $dir 'uninstall.ps1'))
+                if (-not $env:FARSEER_FRESH) { $un += '-KeepConfig' }
+                $said = (& $ps @un 2>&1 | Out-String)
+                if ($LASTEXITCODE) { $ErrorActionPreference = $quiet; throw "Removing the old agent failed (exit $LASTEXITCODE).`r`n$said" }
+            }
 
             $in = @($run + (Join-Path $dir 'install.ps1') + @('-ServerUrl', $server, '-SourceExe', (Join-Path $dir 'farseer-agent.exe'), '-StartNow'))
             if ($env:FARSEER_UPDATE) { $in += '-Update' }
+            if ($env:FARSEER_GUARD_MINUTES -match '^\d{1,4}$') { $in += @('-GuardMinutes', $env:FARSEER_GUARD_MINUTES) }
             if (-not $env:FARSEER_NO_ELEVATED) { $in += '-WithElevatedHelper' }
             if ($env:FARSEER_NO_LOCATION) { $in += '-NoLocation' }
             elseif ($env:FARSEER_LATITUDE -and $env:FARSEER_LONGITUDE) { $in += @('-Latitude', $env:FARSEER_LATITUDE, '-Longitude', $env:FARSEER_LONGITUDE) }
@@ -136,7 +164,7 @@
                 ('$base = ' + (& $q $base)),
                 ('$server = ' + (& $q $server)),
                 ('$files = [ordered]@{ ' + ((@($files.Keys) | ForEach-Object { (& $q $_) + ' = ' + (& $q $files[$_]) }) -join '; ') + ' }'))
-            foreach ($n in 'FARSEER_SERVER', 'FARSEER_ENROLLMENT_KEY', 'FARSEER_UPDATE', 'FARSEER_FRESH', 'FARSEER_NO_ELEVATED', 'FARSEER_NO_LOCATION', 'FARSEER_LATITUDE', 'FARSEER_LONGITUDE', 'FARSEER_NAME_PREFIX') {
+            foreach ($n in 'FARSEER_SERVER', 'FARSEER_ENROLLMENT_KEY', 'FARSEER_UPDATE', 'FARSEER_GUARD_MINUTES', 'FARSEER_SEED', 'FARSEER_FRESH', 'FARSEER_NO_ELEVATED', 'FARSEER_NO_LOCATION', 'FARSEER_LATITUDE', 'FARSEER_LONGITUDE', 'FARSEER_NAME_PREFIX') {
                 $v = [Environment]::GetEnvironmentVariable($n)
                 if ($v) { $pre += ('$env:' + $n + ' = ' + (& $q $v)) }
             }
